@@ -43,9 +43,19 @@ Separate cloud providers into clean tabs:
 ### 📊 **Detail Panel**
 
 Right panel shows full resource details:
+
 - Resource type, name, provider, module
 - All attributes as key-value pairs
 - Full list of dependencies
+
+### 🌐 **Web Graph View**
+
+Open the current provider-filtered graph in your browser:
+
+- Press `w` from the TUI to launch a local web view
+- Terraviz starts a small local HTTP server on `127.0.0.1` using an ephemeral port
+- The browser graph shows only root resources at first, then expands children as you select parents
+- The side panel shows resource metadata including variables, locals, module inputs, and attributes
 
 ## Installation
 
@@ -81,16 +91,17 @@ go build -o terraviz
 
 ## Keyboard Shortcuts
 
-| Key | Action |
-|-----|--------|
-| `↑`/`↓` or `k`/`j` | Navigate up/down in current column |
-| `←` or `h` | Move to previous column (go back up dependency tree) |
-| `→` or `l` | Move to next column (expand children/dependents) |
-| `Tab` | Switch focus to detail panel |
-| `n` or `]` | Next provider tab |
-| `p` or `[` | Previous provider tab |
-| `1-9` | Jump to specific provider tab |
-| `Q` or `Ctrl+C` | Quit |
+| Key                | Action                                               |
+| ------------------ | ---------------------------------------------------- |
+| `↑`/`↓` or `k`/`j` | Navigate up/down in current column                   |
+| `←` or `h`         | Move to previous column (go back up dependency tree) |
+| `→` or `l`         | Move to next column (expand children/dependents)     |
+| `Tab`              | Switch focus to detail panel                         |
+| `n` or `]`         | Next provider tab                                    |
+| `p` or `[`         | Previous provider tab                                |
+| `1-9`              | Jump to specific provider tab                        |
+| `w`                | Open browser graph for the current filtered view     |
+| `Q` or `Ctrl+C`    | Quit                                                 |
 
 ## How It Works
 
@@ -106,19 +117,19 @@ Terraviz shows **who depends on whom**:
 ### Example Flow
 
 ```
-VPC (selected)
-  ↓ depends on
-Subnet, Security Group
-  ↓ depends on
-EC2 Instance
+Resource Group (selected)
+  ↓ supports
+Virtual Network, Log Analytics
+  ↓ supports
+Subnets, Firewall, Private Endpoints
 ```
 
 In Terraviz:
-1. See `aws_vpc.main` in first column
-2. Press `→` to see `aws_subnet.public` and `aws_security_group.web`
-3. Select subnet, press `→` to see `aws_instance.web`
-4. Press `←` to go back to subnet/security group
-5. Press `←` again to go back to VPC
+
+1. Start with a top-level resource such as a resource group or shared network object
+2. Press `→` to reveal the resources that depend on it
+3. Select a child resource and press `→` again to keep following the dependency chain
+4. Press `←` to move back up the tree
 
 ## Project Structure
 
@@ -144,6 +155,7 @@ terraviz/
 ### Primary: HCL Parsing
 
 Parse `.tf` files directly to see planned infrastructure:
+
 - See what you're about to deploy
 - Works without Terraform installed
 - Reads resource blocks and `depends_on` declarations
@@ -151,6 +163,7 @@ Parse `.tf` files directly to see planned infrastructure:
 ### Enhanced: Terraform Graph
 
 If `terraform` is available, automatically enhances with:
+
 - More accurate dependency edges
 - Computed dependencies
 - Better module resolution
@@ -159,6 +172,7 @@ If `terraform` is available, automatically enhances with:
 ### State Files
 
 Parse `.tfstate` JSON to see deployed resources:
+
 - Local state files
 - Remote state via `--from-remote`
 - Shows actual deployed configuration
@@ -170,12 +184,29 @@ Parse `.tfstate` JSON to see deployed resources:
 ```
 
 You'll see:
-- Provider tabs at top (AWS, GOOGLE, AZURE)
-- First column shows root resources (VPC, compute network, resource group)
-- Navigate with arrow keys to explore dependencies
-- Detail panel shows full resource info
 
-Start with AWS tab showing `aws_vpc.main`, press `→` to see subnet and security group, press `→` again on subnet to see the EC2 instance!
+- Provider tabs at top for the available cloud providers in the configuration
+- First column shows top-level Azure landing zone resources
+- Navigate with arrow keys to explore dependency chains
+- Detail panel shows full resource info
+- Press `w` to open the current view in the browser
+
+The example folder includes a browser graph screenshot:
+
+![Terraviz web graph example](example/image.png)
+
+The browser view starts with top-level resources only, then reveals deeper layers as you select parents so large graphs stay readable.
+
+## Web Graph
+
+The web graph is launched from inside the TUI with `w`.
+
+- Terraviz serves a local page and graph JSON from a loopback-only address
+- The server is started on demand and reused for later launches
+- The graph uses the same provider-filtered resource set you are currently viewing in the terminal UI
+- Child resources are only shown when their parent path is selected, which keeps larger Terraform graphs legible
+
+If your browser does not open automatically, Terraviz will still print the local URL in the status bar and you can open it manually.
 
 ## Requirements
 
