@@ -10,17 +10,20 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+const minColumnWidth = 28
+const maxVisibleColumns = 3
+
 // ColumnsView displays resources in Miller Columns (like macOS Finder)
 type ColumnsView struct {
-	styles           *Styles
-	width            int
-	height           int
-	columns          [][]columnItem
-	selectedColumn   int
-	selectedRow      []int // Selected row index for each column
-	dependents       map[string][]string
-	resources        map[string]*model.Resource
-	currentProvider  string
+	styles          *Styles
+	width           int
+	height          int
+	columns         [][]columnItem
+	selectedColumn  int
+	selectedRow     []int // Selected row index for each column
+	dependents      map[string][]string
+	resources       map[string]*model.Resource
+	currentProvider string
 }
 
 type columnItem struct {
@@ -50,35 +53,45 @@ func (c *ColumnsView) SetSize(width, height int) {
 func (c *ColumnsView) SetResources(resources map[string]*model.Resource, edges []model.Edge) {
 	c.resources = resources
 
-	// We don't need a dependents map anymore - we'll use the Dependencies field directly
 	c.dependents = make(map[string][]string)
+	for _, edge := range edges {
+		c.dependents[edge.To] = append(c.dependents[edge.To], edge.From)
+	}
 
-	// Build initial column: all resources (we'll show dependencies when selected)
+	// Build initial column from root resources and expand to dependents.
 	c.buildInitialColumn()
 }
 
-// buildInitialColumn builds the first column with all resources
+// buildInitialColumn builds the first column with root resources
 func (c *ColumnsView) buildInitialColumn() {
-	allResources := make([]*model.Resource, 0)
+	rootResources := make([]*model.Resource, 0)
 
 	for _, res := range c.resources {
-		allResources = append(allResources, res)
+		if len(res.Dependencies) == 0 {
+			rootResources = append(rootResources, res)
+		}
 	}
 
-	// Sort all resources
-	sort.Slice(allResources, func(i, j int) bool {
-		if allResources[i].Type != allResources[j].Type {
-			return allResources[i].Type < allResources[j].Type
+	if len(rootResources) == 0 {
+		for _, res := range c.resources {
+			rootResources = append(rootResources, res)
 		}
-		return allResources[i].Name < allResources[j].Name
+	}
+
+	// Sort root resources
+	sort.Slice(rootResources, func(i, j int) bool {
+		if rootResources[i].Type != rootResources[j].Type {
+			return rootResources[i].Type < rootResources[j].Type
+		}
+		return rootResources[i].Name < rootResources[j].Name
 	})
 
 	// Build column items
 	items := make([]columnItem, 0)
-	for _, res := range allResources {
+	for _, res := range rootResources {
 		items = append(items, columnItem{
 			resource:   res,
-			childCount: len(res.Dependencies), // Number of dependencies
+			childCount: len(c.dependents[res.ID]),
 		})
 	}
 
@@ -144,34 +157,32 @@ func (c *ColumnsView) MoveRight() {
 		return
 	}
 
-	// Check if this resource has dependencies
-	dependencies := selected.Dependencies
-	if len(dependencies) == 0 {
+	children := c.dependents[selected.ID]
+	if len(children) == 0 {
 		return
 	}
 
-	// Build next column with dependencies
-	depResources := make([]*model.Resource, 0)
-	for _, depID := range dependencies {
-		if res, ok := c.resources[depID]; ok {
-			depResources = append(depResources, res)
+	childResources := make([]*model.Resource, 0, len(children))
+	for _, childID := range children {
+		if res, ok := c.resources[childID]; ok {
+			childResources = append(childResources, res)
 		}
 	}
 
-	// Sort dependencies
-	sort.Slice(depResources, func(i, j int) bool {
-		if depResources[i].Type != depResources[j].Type {
-			return depResources[i].Type < depResources[j].Type
+	// Sort dependents
+	sort.Slice(childResources, func(i, j int) bool {
+		if childResources[i].Type != childResources[j].Type {
+			return childResources[i].Type < childResources[j].Type
 		}
-		return depResources[i].Name < depResources[j].Name
+		return childResources[i].Name < childResources[j].Name
 	})
 
 	// Build column items
 	items := make([]columnItem, 0)
-	for _, res := range depResources {
+	for _, res := range childResources {
 		items = append(items, columnItem{
 			resource:   res,
-			childCount: len(res.Dependencies), // Number of dependencies this has
+			childCount: len(c.dependents[res.ID]),
 		})
 	}
 
@@ -198,34 +209,34 @@ func (c *ColumnsView) HandleSelection() {
 		return
 	}
 
-	dependencies := selected.Dependencies
-	if len(dependencies) == 0 {
+	children := c.dependents[selected.ID]
+	if len(children) == 0 {
 		// No dependencies - remove columns to the right
 		c.columns = c.columns[:c.selectedColumn+1]
 		c.selectedRow = c.selectedRow[:c.selectedColumn+1]
 		return
 	}
 
-	// Build next column with dependencies
-	depResources := make([]*model.Resource, 0)
-	for _, depID := range dependencies {
-		if res, ok := c.resources[depID]; ok {
-			depResources = append(depResources, res)
+	// Build next column with dependents
+	childResources := make([]*model.Resource, 0, len(children))
+	for _, childID := range children {
+		if res, ok := c.resources[childID]; ok {
+			childResources = append(childResources, res)
 		}
 	}
 
-	sort.Slice(depResources, func(i, j int) bool {
-		if depResources[i].Type != depResources[j].Type {
-			return depResources[i].Type < depResources[j].Type
+	sort.Slice(childResources, func(i, j int) bool {
+		if childResources[i].Type != childResources[j].Type {
+			return childResources[i].Type < childResources[j].Type
 		}
-		return depResources[i].Name < depResources[j].Name
+		return childResources[i].Name < childResources[j].Name
 	})
 
 	items := make([]columnItem, 0)
-	for _, res := range depResources {
+	for _, res := range childResources {
 		items = append(items, columnItem{
 			resource:   res,
-			childCount: len(res.Dependencies),
+			childCount: len(c.dependents[res.ID]),
 		})
 	}
 
@@ -258,71 +269,172 @@ func (c *ColumnsView) View() string {
 		return c.styles.DetailValue.Render("No resources to display")
 	}
 
-	// Calculate column width (divide available width by number of visible columns)
-	visibleColumns := len(c.columns)
-	if visibleColumns > 4 {
-		visibleColumns = 4 // Show max 4 columns
-	}
+	availableWidth := c.width
+	visibleColumns := c.visibleColumnCount(availableWidth)
 
-	columnWidth := (c.width - 8) / visibleColumns
-	if columnWidth < 20 {
-		columnWidth = 20
+	columnWidth := availableWidth / visibleColumns
+	if columnWidth < 1 {
+		columnWidth = 1
 	}
 
 	var columns []string
 
-	// Determine which columns to show (show current column and context)
-	startCol := c.selectedColumn
-	if startCol > len(c.columns)-visibleColumns && len(c.columns) >= visibleColumns {
-		startCol = len(c.columns) - visibleColumns
-	}
-	if startCol < 0 {
-		startCol = 0
-	}
+	startCol := c.windowStart(visibleColumns)
 
+	columns = columns[:0]
 	for colIdx := startCol; colIdx < len(c.columns) && colIdx < startCol+visibleColumns; colIdx++ {
-		columns = append(columns, c.renderColumn(colIdx, columnWidth))
+		columns = append(columns, c.renderColumn(colIdx, columnWidth, c.height))
 	}
 
 	return lipgloss.JoinHorizontal(lipgloss.Top, columns...)
 }
 
-// renderColumn renders a single column
-func (c *ColumnsView) renderColumn(colIdx int, width int) string {
-	var lines []string
-
-	// Column header
-	header := "Dependencies"
-	if colIdx == 0 {
-		header = "All Resources"
-	} else if colIdx == 1 {
-		header = "Depends On"
+func (c *ColumnsView) visibleColumnCount(availableWidth int) int {
+	visibleColumns := availableWidth / minColumnWidth
+	if visibleColumns < 1 {
+		visibleColumns = 1
+	}
+	if visibleColumns > maxVisibleColumns {
+		visibleColumns = maxVisibleColumns
+	}
+	if visibleColumns > len(c.columns) {
+		visibleColumns = len(c.columns)
+	}
+	if visibleColumns == 0 {
+		visibleColumns = 1
 	}
 
-	headerStyle := c.styles.ModuleHeader.Width(width - 2).Align(lipgloss.Center)
-	lines = append(lines, headerStyle.Render(header))
-	lines = append(lines, strings.Repeat("─", width))
+	return visibleColumns
+}
+
+func (c *ColumnsView) BreadcrumbHeight() int {
+	if len(c.columns) == 0 || c.height <= 6 {
+		return 0
+	}
+
+	visibleColumns := c.visibleColumnCount(c.width)
+	startCol := c.windowStart(visibleColumns)
+	return lipgloss.Height(c.renderBreadcrumb(startCol, visibleColumns))
+}
+
+func (c *ColumnsView) Breadcrumb() string {
+	if len(c.columns) == 0 || c.height <= 6 {
+		return ""
+	}
+
+	visibleColumns := c.visibleColumnCount(c.width)
+	startCol := c.windowStart(visibleColumns)
+	return c.renderBreadcrumb(startCol, visibleColumns)
+}
+
+func (c *ColumnsView) windowStart(visibleColumns int) int {
+	if visibleColumns <= 0 {
+		return 0
+	}
+
+	startCol := c.selectedColumn - visibleColumns + 1
+	if startCol < 0 {
+		startCol = 0
+	}
+
+	maxStart := len(c.columns) - visibleColumns
+	if maxStart < 0 {
+		maxStart = 0
+	}
+	if startCol > maxStart {
+		startCol = maxStart
+	}
+
+	return startCol
+}
+
+func (c *ColumnsView) renderBreadcrumb(startCol, visibleColumns int) string {
+	segments := make([]string, 0, visibleColumns+2)
+	endCol := startCol + visibleColumns
+	if endCol > len(c.columns) {
+		endCol = len(c.columns)
+	}
+
+	if startCol > 0 {
+		segments = append(segments, c.styles.BreadcrumbDim.Render(fmt.Sprintf("... %d earlier", startCol)))
+	}
+
+	for colIdx := startCol; colIdx < endCol; colIdx++ {
+		label := c.columnLabel(colIdx)
+		style := c.styles.BreadcrumbDim
+		if colIdx == c.selectedColumn {
+			style = c.styles.Breadcrumb
+		}
+		segments = append(segments, style.Render(label))
+	}
+
+	if endCol < len(c.columns) {
+		segments = append(segments, c.styles.BreadcrumbDim.Render(fmt.Sprintf("%d more ...", len(c.columns)-endCol)))
+	}
+
+	if len(segments) == 0 {
+		segments = append(segments, c.styles.BreadcrumbDim.Render("No columns"))
+	}
+
+	row := strings.Join(segments, " ")
+	return lipgloss.NewStyle().Width(c.width).MaxWidth(c.width).Render(truncateLabel(row, c.width))
+}
+
+func (c *ColumnsView) columnLabel(colIdx int) string {
+	switch colIdx {
+	case 0:
+		return "Top Level"
+	case 1:
+		return "Children"
+	default:
+		return fmt.Sprintf("Level %d", colIdx)
+	}
+}
+
+// renderColumn renders a single column
+func (c *ColumnsView) renderColumn(colIdx int, width, height int) string {
+	borderStyle := c.styles.UnfocusedBorder
+	if colIdx == c.selectedColumn {
+		borderStyle = c.styles.FocusedBorder
+	}
+
+	// Column header
+	header := c.columnLabel(colIdx)
+
+	innerWidth := width - borderStyle.GetHorizontalFrameSize()
+	if innerWidth < 1 {
+		innerWidth = 1
+	}
+
+	headerStyle := c.styles.ModuleHeader.Width(innerWidth).Align(lipgloss.Center)
+	headerBlock := lipgloss.JoinVertical(
+		lipgloss.Left,
+		headerStyle.Render(truncateLabel(header, innerWidth)),
+		truncateLabel(strings.Repeat("─", innerWidth), innerWidth),
+	)
 
 	// Column items
 	items := c.columns[colIdx]
 	selectedRow := c.selectedRow[colIdx]
 	isFocused := colIdx == c.selectedColumn
 
-	availableHeight := c.height - 4 // Reserve space for header and borders
-	startRow := 0
-	if selectedRow >= availableHeight {
-		startRow = selectedRow - availableHeight + 1
+	innerHeight := height - borderStyle.GetVerticalFrameSize()
+	if innerHeight < 1 {
+		innerHeight = 1
 	}
 
-	for i := startRow; i < len(items) && i < startRow+availableHeight; i++ {
+	headHeight := lipgloss.Height(headerBlock)
+	bodyHeight := innerHeight - headHeight
+	if bodyHeight < 1 {
+		bodyHeight = 1
+	}
+
+	startRow := c.scrollOffset(selectedRow, len(items), bodyHeight)
+	bodyLines := make([]string, 0, bodyHeight)
+
+	for i := startRow; i < len(items) && i < startRow+bodyHeight; i++ {
 		item := items[i]
 		isSelected := i == selectedRow && isFocused
-
-		// Build line
-		resourceText := fmt.Sprintf("%s.%s", item.resource.Type, item.resource.Name)
-		if len(resourceText) > width-6 {
-			resourceText = resourceText[:width-6] + "..."
-		}
 
 		// Add child indicator
 		suffix := ""
@@ -330,33 +442,64 @@ func (c *ColumnsView) renderColumn(colIdx int, width int) string {
 			suffix = fmt.Sprintf(" (%d)", item.childCount)
 		}
 
+		resourceText := truncateLabel(fmt.Sprintf("%s.%s", item.resource.Type, item.resource.Name), innerWidth-lipgloss.Width(suffix))
+
 		line := resourceText + suffix
 
 		// Apply styling
 		providerStyle := c.styles.GetProviderStyle(item.resource.Provider)
 
 		if isSelected {
-			line = c.styles.SelectedRow.Width(width - 2).Render(line)
+			line = c.styles.SelectedRow.Width(innerWidth).Render(line)
 		} else {
-			line = providerStyle.Width(width - 2).Render(line)
+			line = providerStyle.Width(innerWidth).Render(line)
 		}
 
-		lines = append(lines, line)
+		bodyLines = append(bodyLines, line)
 	}
 
-	// Fill remaining space
-	for len(lines) < c.height-2 {
-		lines = append(lines, strings.Repeat(" ", width))
+	for len(bodyLines) < bodyHeight {
+		bodyLines = append(bodyLines, lipgloss.NewStyle().Width(innerWidth).Render(""))
 	}
 
-	// Build column with border
-	borderStyle := c.styles.UnfocusedBorder
-	if isFocused {
-		borderStyle = c.styles.FocusedBorder
+	bodyBlock := lipgloss.JoinVertical(lipgloss.Left, bodyLines...)
+	content := lipgloss.JoinVertical(lipgloss.Left, headerBlock, bodyBlock)
+
+	return borderedBox(borderStyle, width, height, content)
+}
+
+func (c *ColumnsView) scrollOffset(selectedRow, itemCount, bodyHeight int) int {
+	if bodyHeight <= 0 || itemCount <= bodyHeight || selectedRow < bodyHeight {
+		return 0
 	}
 
-	return borderStyle.
-		Width(width).
-		Height(c.height - 2).
-		Render(strings.Join(lines, "\n"))
+	startRow := selectedRow - bodyHeight + 1
+	maxStart := itemCount - bodyHeight
+	if maxStart < 0 {
+		maxStart = 0
+	}
+	if startRow > maxStart {
+		startRow = maxStart
+	}
+	if startRow < 0 {
+		startRow = 0
+	}
+
+	return startRow
+}
+
+func truncateLabel(value string, maxWidth int) string {
+	if maxWidth <= 0 {
+		return ""
+	}
+
+	if lipgloss.Width(value) <= maxWidth {
+		return value
+	}
+
+	if maxWidth <= 3 {
+		return strings.Repeat(".", maxWidth)
+	}
+
+	return value[:maxWidth-3] + "..."
 }

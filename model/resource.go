@@ -9,6 +9,9 @@ type Resource struct {
 	Module       string
 	Attributes   map[string]any
 	Dependencies []string
+	LocalRefs    []string
+	VariableRefs []string
+	ModuleInputs map[string][]string
 }
 
 // Edge represents a directed edge between two resources in the dependency graph

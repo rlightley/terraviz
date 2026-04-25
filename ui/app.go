@@ -20,18 +20,18 @@ const (
 
 // Model represents the main application model
 type Model struct {
-	columnsView      ColumnsView
-	detail           DetailView
-	styles           *Styles
-	graph            *model.Graph
-	allResources     map[string]*model.Resource
-	allEdges         []model.Edge
-	parseResult      *parser.ParseResult
-	focus            FocusPanel
-	width            int
-	height           int
-	providers        []string // List of available providers
-	providerIndex    int      // Current provider tab index
+	columnsView   ColumnsView
+	detail        DetailView
+	styles        *Styles
+	graph         *model.Graph
+	allResources  map[string]*model.Resource
+	allEdges      []model.Edge
+	parseResult   *parser.ParseResult
+	focus         FocusPanel
+	width         int
+	height        int
+	providers     []string // List of available providers
+	providerIndex int      // Current provider tab index
 }
 
 // NewModel creates a new application model
@@ -242,17 +242,42 @@ func (m *Model) updateDetail() {
 
 // layoutPanels calculates and sets the sizes of the panels
 func (m *Model) layoutPanels() {
-	// Reserve space for provider tabs (2 lines) and status bar (1 line)
-	tabsHeight := 2
+	// Reserve space for provider tabs and status bar using rendered heights.
+	tabsHeight := lipgloss.Height(m.renderProviderTabs())
+	if tabsHeight < 1 {
+		tabsHeight = 1
+	}
 	statusBarHeight := 1
 	availableHeight := m.height - tabsHeight - statusBarHeight
+	if availableHeight < 1 {
+		availableHeight = 1
+	}
 
-	// Split width: 70% columns, 30% detail
-	columnsWidth := m.width * 70 / 100
+	totalPanels := 2
+	if m.width >= minColumnWidth*4 {
+		totalPanels = maxVisibleColumns + 1
+	} else if m.width >= minColumnWidth*3 {
+		totalPanels = 3
+	}
+
+	unitWidth := m.width / totalPanels
+	if unitWidth < 1 {
+		unitWidth = 1
+	}
+
+	visibleColumns := totalPanels - 1
+	columnsWidth := unitWidth * visibleColumns
 	detailWidth := m.width - columnsWidth
 
 	m.columnsView.SetSize(columnsWidth, availableHeight)
-	m.detail.SetSize(detailWidth, availableHeight)
+	breadcrumbHeight := m.columnsView.BreadcrumbHeight()
+	panelHeight := availableHeight - breadcrumbHeight
+	if panelHeight < 1 {
+		panelHeight = 1
+	}
+
+	m.columnsView.SetSize(columnsWidth, panelHeight)
+	m.detail.SetSize(detailWidth, panelHeight)
 }
 
 // View renders the application
@@ -263,6 +288,7 @@ func (m Model) View() string {
 
 	// Render provider tabs
 	tabs := m.renderProviderTabs()
+	breadcrumb := m.columnsView.Breadcrumb()
 
 	// Render panels
 	columnsPanel := m.columnsView.View()
@@ -274,8 +300,11 @@ func (m Model) View() string {
 	// Render status bar
 	statusBar := m.renderStatusBar()
 
-	// Combine everything
-	return lipgloss.JoinVertical(lipgloss.Left, tabs, panels, statusBar)
+	if breadcrumb == "" {
+		return lipgloss.JoinVertical(lipgloss.Left, tabs, panels, statusBar)
+	}
+
+	return lipgloss.JoinVertical(lipgloss.Left, tabs, breadcrumb, panels, statusBar)
 }
 
 // renderProviderTabs renders the provider tabs at the top
@@ -288,29 +317,44 @@ func (m Model) renderProviderTabs() string {
 		providerName := strings.ToUpper(provider)
 		tabStyle := lipgloss.NewStyle().
 			Padding(0, 2).
-			BorderStyle(lipgloss.NormalBorder()).
-			BorderBottom(true)
+			MarginRight(1).
+			BorderStyle(lipgloss.RoundedBorder())
 
 		if isActive {
 			tabStyle = tabStyle.
+				Background(lipgloss.Color("237")).
 				BorderForeground(m.styles.GetProviderStyle(provider).GetForeground()).
 				Foreground(m.styles.GetProviderStyle(provider).GetForeground()).
 				Bold(true)
 		} else {
 			tabStyle = tabStyle.
 				BorderForeground(lipgloss.Color("240")).
-				Foreground(lipgloss.Color("246"))
+				Foreground(lipgloss.Color("246")).
+				Background(lipgloss.Color("235"))
 		}
 
 		tabs = append(tabs, tabStyle.Render(providerName))
 	}
 
 	tabsRow := lipgloss.JoinHorizontal(lipgloss.Top, tabs...)
+	brand := m.renderBrandBanner()
+	headerRow := lipgloss.JoinHorizontal(lipgloss.Top, brand, lipgloss.NewStyle().Width(2).Render(""), tabsRow)
 
 	// Add separator line
 	separator := strings.Repeat("─", m.width)
 
-	return lipgloss.JoinVertical(lipgloss.Left, tabsRow, separator)
+	return lipgloss.JoinVertical(lipgloss.Left, headerRow, separator)
+}
+
+func (m Model) renderBrandBanner() string {
+	return lipgloss.NewStyle().
+		Foreground(lipgloss.Color("255")).
+		Background(lipgloss.Color("93")).
+		BorderStyle(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("141")).
+		Bold(true).
+		Padding(0, 2).
+		Render("Terraviz")
 }
 
 // renderDetailPanel renders the detail panel with border
@@ -320,10 +364,7 @@ func (m Model) renderDetailPanel() string {
 		borderStyle = m.styles.FocusedBorder
 	}
 
-	return borderStyle.
-		Width(m.width*60/100 - 2).
-		Height(m.height - 3).
-		Render(m.detail.View())
+	return borderedBox(borderStyle, m.detail.width, m.detail.height, m.detail.View())
 }
 
 // renderStatusBar renders the status bar
@@ -333,10 +374,15 @@ func (m Model) renderStatusBar() string {
 	// Mode indicator
 	mode := string(m.parseResult.Mode)
 	parts = append(parts, fmt.Sprintf("Mode: %s", mode))
+	parts = append(parts, fmt.Sprintf("Focus: %s", m.focusLabel()))
 
 	// Resource count
 	resources, _ := m.getCurrentResourcesAndEdges()
 	parts = append(parts, fmt.Sprintf("Resources: %d", len(resources)))
+
+	if selected := m.columnsView.GetSelectedResource(); selected != nil {
+		parts = append(parts, fmt.Sprintf("Selected: %s", truncateText(fmt.Sprintf("%s.%s", selected.Type, selected.Name), 36)))
+	}
 
 	// Failed files
 	if len(m.parseResult.FailedFiles) > 0 {
@@ -370,4 +416,28 @@ func (m Model) renderStatusBar() string {
 	return m.styles.StatusBar.
 		Width(m.width).
 		Render(statusContent)
+}
+
+func (m Model) focusLabel() string {
+	if m.focus == FocusDetail {
+		return "detail"
+	}
+
+	return "columns"
+}
+
+func truncateText(value string, maxWidth int) string {
+	if maxWidth <= 0 {
+		return ""
+	}
+
+	if lipgloss.Width(value) <= maxWidth {
+		return value
+	}
+
+	if maxWidth <= 3 {
+		return strings.Repeat(".", maxWidth)
+	}
+
+	return value[:maxWidth-3] + "..."
 }

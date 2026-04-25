@@ -2,27 +2,44 @@ package ui
 
 import "github.com/charmbracelet/lipgloss"
 
+func borderedBox(style lipgloss.Style, totalWidth, totalHeight int, content string) string {
+	innerWidth := totalWidth - style.GetHorizontalFrameSize()
+	if innerWidth < 1 {
+		innerWidth = 1
+	}
+
+	innerHeight := totalHeight - style.GetVerticalFrameSize()
+	if innerHeight < 1 {
+		innerHeight = 1
+	}
+
+	framedContent := lipgloss.NewStyle().Width(innerWidth).Height(innerHeight).Render(content)
+	return style.Width(innerWidth).Height(innerHeight).Render(framedContent)
+}
+
 // Styles holds all the styling for the TUI
 type Styles struct {
 	// Panel styles
-	BorderStyle      lipgloss.Style
-	FocusedBorder    lipgloss.Style
-	UnfocusedBorder  lipgloss.Style
-	SelectedRow      lipgloss.Style
-	UnselectedRow    lipgloss.Style
-	ModuleHeader     lipgloss.Style
+	BorderStyle     lipgloss.Style
+	FocusedBorder   lipgloss.Style
+	UnfocusedBorder lipgloss.Style
+	SelectedRow     lipgloss.Style
+	UnselectedRow   lipgloss.Style
+	ModuleHeader    lipgloss.Style
+	Breadcrumb      lipgloss.Style
+	BreadcrumbDim   lipgloss.Style
 
 	// Provider colors
-	ProviderAWS      lipgloss.Style
-	ProviderGoogle   lipgloss.Style
-	ProviderAzure    lipgloss.Style
-	ProviderDefault  lipgloss.Style
+	ProviderAWS     lipgloss.Style
+	ProviderGoogle  lipgloss.Style
+	ProviderAzure   lipgloss.Style
+	ProviderDefault lipgloss.Style
 
 	// Detail view styles
-	DetailHeader     lipgloss.Style
-	DetailKey        lipgloss.Style
-	DetailValue      lipgloss.Style
-	SectionTitle     lipgloss.Style
+	DetailHeader lipgloss.Style
+	DetailKey    lipgloss.Style
+	DetailValue  lipgloss.Style
+	SectionTitle lipgloss.Style
 
 	// Status bar styles
 	StatusBar        lipgloss.Style
@@ -33,17 +50,17 @@ type Styles struct {
 // NewStyles creates and initializes all styles
 func NewStyles() *Styles {
 	// Define colors
-	mutedGray := lipgloss.Color("240")
-	highlightBg := lipgloss.Color("237")
-	selectedBg := lipgloss.Color("62")
+	mutedGray := lipgloss.Color("243")
+	highlightBg := lipgloss.Color("238")
+	selectedBg := lipgloss.Color("31")
 
 	awsOrange := lipgloss.Color("214")
 	googleBlue := lipgloss.Color("69")
-	azureTeal := lipgloss.Color("45")
+	azureTeal := lipgloss.Color("38")
 	defaultGray := lipgloss.Color("246")
 
-	statusBg := lipgloss.Color("235")
-	statusFg := lipgloss.Color("252")
+	statusBg := lipgloss.Color("236")
+	statusFg := lipgloss.Color("254")
 	warningYellow := lipgloss.Color("220")
 
 	return &Styles{
@@ -62,16 +79,27 @@ func NewStyles() *Styles {
 		SelectedRow: lipgloss.NewStyle().
 			Background(selectedBg).
 			Foreground(lipgloss.Color("255")).
-			Bold(true),
+			Bold(true).
+			Padding(0, 1),
 
 		UnselectedRow: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("252")),
 
 		ModuleHeader: lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("141")).
-			MarginTop(1).
+			Foreground(lipgloss.Color("222")).
+			MarginTop(0).
 			MarginBottom(0),
+
+		Breadcrumb: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("252")).
+			Background(lipgloss.Color("237")).
+			Padding(0, 1),
+
+		BreadcrumbDim: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("244")).
+			Background(lipgloss.Color("236")).
+			Padding(0, 1),
 
 		ProviderAWS: lipgloss.NewStyle().
 			Foreground(awsOrange).
@@ -90,12 +118,12 @@ func NewStyles() *Styles {
 
 		DetailHeader: lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("212")).
+			Foreground(lipgloss.Color("223")).
 			MarginBottom(1).
 			Padding(0, 1),
 
 		DetailKey: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("111")).
+			Foreground(lipgloss.Color("117")).
 			Bold(true),
 
 		DetailValue: lipgloss.NewStyle().
@@ -103,7 +131,7 @@ func NewStyles() *Styles {
 
 		SectionTitle: lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("141")).
+			Foreground(lipgloss.Color("186")).
 			MarginTop(1).
 			MarginBottom(0),
 
