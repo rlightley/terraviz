@@ -24,6 +24,7 @@ type Model struct {
 	detail        DetailView
 	styles        *Styles
 	graph         *model.Graph
+	webServer     *webGraphServer
 	allResources  map[string]*model.Resource
 	allEdges      []model.Edge
 	parseResult   *parser.ParseResult
@@ -32,6 +33,12 @@ type Model struct {
 	height        int
 	providers     []string // List of available providers
 	providerIndex int      // Current provider tab index
+	webStatus     string
+}
+
+type webLaunchMsg struct {
+	url string
+	err error
 }
 
 // NewModel creates a new application model
@@ -72,6 +79,7 @@ func NewModel(parseResult *parser.ParseResult) Model {
 		detail:        NewDetailView(styles),
 		styles:        styles,
 		graph:         parseResult.Graph,
+		webServer:     newWebGraphServer(),
 		allResources:  parseResult.Graph.Resources,
 		allEdges:      parseResult.Graph.Edges,
 		parseResult:   parseResult,
@@ -98,6 +106,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "ctrl+c", "q":
 			return m, tea.Quit
+
+		case "w":
+			return m, m.launchWebGraphCmd()
 
 		case "up", "k":
 			if m.focus == FocusColumns {
@@ -161,6 +172,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+	case webLaunchMsg:
+		if msg.err != nil {
+			m.webStatus = fmt.Sprintf("Web graph failed: %v", msg.err)
+		} else {
+			m.webStatus = fmt.Sprintf("Web graph opened: %s", msg.url)
+		}
+
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
@@ -168,6 +186,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+func (m Model) launchWebGraphCmd() tea.Cmd {
+	resources, edges := m.getCurrentResourcesAndEdges()
+	provider := "all"
+	if m.providerIndex >= 0 && m.providerIndex < len(m.providers) {
+		provider = m.providers[m.providerIndex]
+	}
+
+	server := m.webServer
+	return func() tea.Msg {
+		url, err := server.Open(resources, edges, provider)
+		return webLaunchMsg{url: url, err: err}
+	}
 }
 
 // updateColumnsView updates the columns view with current provider filter
@@ -390,6 +422,10 @@ func (m Model) renderStatusBar() string {
 		parts = append(parts, m.styles.StatusBarWarning.Render(failedMsg))
 	}
 
+	if m.webStatus != "" {
+		parts = append(parts, truncateText(m.webStatus, 52))
+	}
+
 	leftSide := strings.Join(parts, " │ ")
 
 	// Keybindings
@@ -398,6 +434,7 @@ func (m Model) renderStatusBar() string {
 		m.styles.StatusBarKey.Render("←→") + "columns",
 		m.styles.StatusBarKey.Render("Tab") + "detail",
 		m.styles.StatusBarKey.Render("N/P") + "tabs",
+		m.styles.StatusBarKey.Render("W") + "web",
 		m.styles.StatusBarKey.Render("Q") + "quit",
 	}
 	rightSide := strings.Join(keys, " ")
